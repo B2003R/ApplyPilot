@@ -1,0 +1,5 @@
+{
+  "name": "ApplyPilot",
+  "user": "ubuntu",
+  "install": "pip install -e \".[dev]\" --break-system-packages && pip install --no-deps python-jobspy --break-system-packages && pip install pydantic tls-client requests markdownify regex --break-system-packages && python3 -m playwright install chromium"
+}
