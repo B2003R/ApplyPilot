@@ -136,6 +136,12 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
 
     # Run migrations for any columns added after initial schema
     ensure_columns(conn)
+    conn.execute("""
+        UPDATE jobs
+        SET application_url = NULL
+        WHERE lower(trim(application_url)) IN ('', 'none', 'null', 'nan')
+    """)
+    conn.commit()
 
     return conn
 

@@ -30,6 +30,16 @@ PACKAGE_DIR = Path(__file__).parent
 CONFIG_DIR = PACKAGE_DIR / "config"
 
 
+def optional_url(value: object) -> str | None:
+    """Return a usable URL or None for missing/sentinel values."""
+    if value is None:
+        return None
+    url = str(value).strip()
+    if not url or url.lower() in {"none", "null", "nan"}:
+        return None
+    return url
+
+
 def get_chrome_path() -> str:
     """Auto-detect Chrome/Chromium executable path, cross-platform.
 

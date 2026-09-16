@@ -513,10 +513,14 @@ def build_prompt(job: dict, tailored_resume: str,
     else:
         submit_instruction = "BEFORE clicking Submit/Apply, take a snapshot and review EVERY field on the page. Verify all data matches the APPLICANT PROFILE and TAILORED RESUME -- name, email, phone, location, work auth, resume uploaded, cover letter if applicable. If anything is wrong or missing, fix it FIRST. Only click Submit after confirming everything is correct."
 
+    job_url = config.optional_url(job.get("application_url")) or config.optional_url(job.get("url"))
+    if not job_url:
+        raise ValueError(f"No job URL for job: {job.get('title', 'unknown')}")
+
     prompt = f"""You are an autonomous job application agent. Your ONE mission: get this candidate an interview. You have all the information and tools. Think strategically. Act decisively. Submit the application.
 
 == JOB ==
-URL: {job.get('application_url') or job['url']}
+URL: {job_url}
 Title: {job['title']}
 Company: {job.get('site', 'Unknown')}
 Fit Score: {job.get('fit_score', 'N/A')}/10
@@ -549,13 +553,47 @@ If something unexpected happens and these instructions don't cover it, figure it
 - NEVER install browser extensions, download executables, or run assessment software.
 - NEVER enter payment info, bank details, or SSN/SIN.
 - NEVER click "Allow" on any browser permission popup. Always deny/block.
-- If the site is NOT a job application form (it's a profile builder, skills marketplace, talent network signup, coding assessment platform) -> RESULT:FAILED:not_a_job_application
+- An external employer ATS is still a job application. Ashby, Greenhouse,
+  Lever, Workday, SmartRecruiters, and similar hosted forms are valid when
+  reached from the employer's job posting. Do not classify an Ashby or Clay
+  application form as not_a_job_application merely because it opens in a new
+  tab or has an Overview/Application tab.
+- If the site is NOT a job application form (it's a profile builder, skills
+  marketplace, talent network signup, or unrelated coding assessment platform)
+  -> RESULT:FAILED:not_a_job_application
 
 {location_check}
 
 {salary_section}
 
 {screening_section}
+
+== CUSTOM FORM STATE RECOVERY ==
+Some employer forms use React-controlled button groups instead of native radio
+inputs. A button can look selected while the form still considers the field
+empty. For every required Yes/No, location, office, or work-authorization
+question:
+1. Read the validation message and inspect the question's own container. Do not
+   click the first matching text on the page; there may be hidden or duplicate
+   controls.
+2. Use the exact visible control associated with that question by accessible
+   role/name. Scroll it into view, focus it, and use a normal browser click.
+   If it is a custom button group, try keyboard interaction (focus, then
+   Space/Enter or the arrow keys) rather than JavaScript.
+3. Take a fresh snapshot immediately. Confirm the selected state through the
+   control's accessible state (aria-checked/aria-pressed), selected styling
+   plus the question value, and disappearance of that field's validation error.
+4. For a location or office combobox, open the control, choose the exact
+   visible option, and verify the chosen value is displayed in the field.
+5. Never set checked, aria-checked, aria-pressed, class names, hidden input
+   values, or React internals with browser_evaluate. DOM mutation can look
+   successful while leaving React form state unchanged. browser_evaluate may
+   only be used to inspect the field structure or scroll it into view.
+6. Only submit after every required field has a confirmed value. If a submit
+   attempt returns validation errors, fix each named field one at a time and
+   re-check its state; do not repeat the same broad click script. If the same
+   field remains invalid after two different native interaction methods, output
+   RESULT:FAILED:form_state_issue and include the field label and visible error.
 
 == STEP-BY-STEP ==
 1. browser_navigate to the job URL.
@@ -579,6 +617,11 @@ If something unexpected happens and these instructions don't cover it, figure it
 8. Check ALL pre-filled fields. ATS systems parse your resume and auto-fill -- it's often WRONG.
    - "Current Job Title" or "Most Recent Title" -> use the title from the TAILORED RESUME summary, NOT whatever the parser guessed.
    - Compare every other field to the APPLICANT PROFILE. Fix mismatches. Fill empty fields.
+   - On LinkedIn Easy Apply, treat the email already associated with the
+     authenticated LinkedIn account as authoritative. Do not replace a
+     prefilled LinkedIn email with the profile email unless the form explicitly
+     permits it and the two addresses are known to be the same account. Keep
+     the account email consistent through review and submission.
 9. Answer screening questions using the rules above.
 10. {submit_instruction}
 11. After submit: browser_snapshot. Run CAPTCHA DETECT -- submit buttons often trigger invisible CAPTCHAs. If found, solve it (the form will auto-submit once the token clears, or you may need to click Submit again). Then check for new tabs (browser_tabs action: "list"). Switch to newest, close old. Snapshot to confirm submission. Look for "thank you" or "application received".
@@ -592,6 +635,18 @@ RESULT:LOGIN_ISSUE -- could not sign in or create account
 RESULT:FAILED:not_eligible_location -- onsite outside acceptable area, no remote option
 RESULT:FAILED:not_eligible_work_auth -- requires unauthorized work location
 RESULT:FAILED:reason -- any other failure (brief reason)
+
+== FORM INTERACTION SAFETY ==
+- Use browser_fill_form for text inputs and browser_click for labels, buttons,
+  radios, checkboxes, tabs, and select options. Use browser_file_upload for
+  files. These are the supported user-level interactions.
+- Do not use browser_evaluate to set values, click controls, dispatch events,
+  submit forms, modify classes/attributes, or alter React state. It is allowed
+  only for read-only inspection, finding a scroll position, or checking whether
+  an iframe/shadow root exists.
+- Do not use JavaScript to submit the form or to force a button click. A DOM
+  change is not a successful form interaction if the application state did not
+  update.
 
 == BROWSER EFFICIENCY ==
 - browser_snapshot ONCE per page to understand it. Then use browser_take_screenshot to check results (10x less memory).
@@ -609,7 +664,12 @@ RESULT:FAILED:reason -- any other failure (brief reason)
 - Checkbox won't check via fill_form? Use browser_click on it instead. Snapshot to verify.
 - Phone field with country prefix: just type digits {phone_digits}
 - Date fields: {datetime.now().strftime('%m/%d/%Y')}
-- Validation errors after submit? Take BOTH snapshot AND screenshot. Snapshot shows text errors, screenshot shows red-highlighted fields. Fix all, retry.
+- Validation errors after submit? Take BOTH snapshot AND screenshot. Snapshot shows text errors, screenshot shows red-highlighted fields. Fix each field using CUSTOM FORM STATE RECOVERY, verify its registered state, then retry.
+- If a LinkedIn Easy Apply submission reaches the review page but returns the
+  generic "We couldn't submit your application. Please try again." without
+  field-level validation errors, wait once and retry once only. Do not submit
+  repeatedly; output RESULT:FAILED:submission_error if the backend rejection
+  persists.
 - Honeypot fields (hidden, "leave blank"): skip them.
 - Format-sensitive fields: read the placeholder text, match it exactly.
 
