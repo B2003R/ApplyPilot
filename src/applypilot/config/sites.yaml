@@ -8,6 +8,10 @@
 # are flagged as "manual" during apply — bot skips, user applies by hand.
 manual_ats:
   - "ibegin.tcsapps.com"       # TCS iBegin — unsolvable CAPTCHA every time
+  - "jobs.tcs.com"
+  - "careers.tcs.com"
+  - "auth.oraclecloud.com"      # Oracle Cloud SSO
+  - "login.taleo.net"           # Taleo auth portal
 
 # ── Blocked sites — too problematic for automation ───────────────────────
 blocked:
