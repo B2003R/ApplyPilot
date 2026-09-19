@@ -29,12 +29,42 @@ _chrome_lock = threading.Lock()
 # Cross-platform process helpers
 # ---------------------------------------------------------------------------
 
+def _kill_pid_and_children(pid: int) -> None:
+    """Kill *pid* and its descendants without signalling our own process group.
+
+    Used when the target was not started in an isolated session, so ``killpg``
+    would take down ApplyPilot itself.
+    """
+    import os
+    import signal as _signal
+
+    children: list[int] = []
+    try:
+        proc_dir = Path(f"/proc/{pid}/task")
+        if proc_dir.exists():
+            for task in proc_dir.iterdir():
+                child_file = task / "children"
+                if child_file.exists():
+                    children.extend(
+                        int(x) for x in child_file.read_text().split() if x.isdigit()
+                    )
+    except OSError:
+        pass
+    for child in children:
+        _kill_pid_and_children(child)
+    try:
+        os.kill(pid, _signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
 def _kill_process_tree(pid: int) -> None:
     """Kill a process and all its children.
 
     On Windows, Chrome spawns 10+ child processes (GPU, renderer, etc.),
     so taskkill /T is needed to kill the entire tree. On Unix, os.killpg
-    handles the process group.
+    handles an *isolated* process group. If the target still shares our
+    process group, we never killpg — that would SIGKILL ApplyPilot.
     """
     import signal as _signal
 
@@ -47,12 +77,14 @@ def _kill_process_tree(pid: int) -> None:
                 timeout=10,
             )
         else:
-            # Unix: kill entire process group
             import os
             try:
-                os.killpg(os.getpgid(pid), _signal.SIGKILL)
+                pgid = os.getpgid(pid)
+                if pgid != os.getpgrp():
+                    os.killpg(pgid, _signal.SIGKILL)
+                else:
+                    _kill_pid_and_children(pid)
             except (ProcessLookupError, PermissionError):
-                # Process already gone or owned by another user
                 try:
                     os.kill(pid, _signal.SIGKILL)
                 except (ProcessLookupError, PermissionError):

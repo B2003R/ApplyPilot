@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   job description, location, skills, and resume facts are injected into the apply prompt;
   wall-clock `apply_timeout` kills hung Claude sessions mid-run; CAPTCHA/login failures
   are retryable instead of permanent one-strikes; expanded `manual_ats` skip list
+- **Apply timeout no longer kills ApplyPilot** — Claude is started in its own session
+  and `_kill_process_tree` refuses to `killpg` the parent process group. A hung apply
+  used to SIGKILL the whole pipeline (and Ctrl+C skip did the same) because Claude
+  shared ApplyPilot's process group.
 
 ## [0.2.0] - 2026-02-17
 
