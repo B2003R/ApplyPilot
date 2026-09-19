@@ -6,7 +6,6 @@ personal data is loaded from the user's profile -- nothing is hardcoded.
 """
 
 import logging
-import os
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -29,6 +28,8 @@ def _build_profile_summary(profile: dict) -> str:
     exp = p.get("experience", {})
     avail = p.get("availability", {})
     eeo = p.get("eeo_voluntary", {})
+    boundary = p.get("skills_boundary", {})
+    resume_facts = p.get("resume_facts", {})
 
     lines = [
         f"Name: {personal['full_name']}",
@@ -70,9 +71,40 @@ def _build_profile_summary(profile: dict) -> str:
         lines.append(f"Years Experience: {exp['years_of_experience_total']}")
     if exp.get("education_level"):
         lines.append(f"Education: {exp['education_level']}")
+    # Wizard uses current_title; example profile uses current_job_title
+    current_title = exp.get("current_job_title") or exp.get("current_title") or ""
+    current_company = exp.get("current_company") or ""
+    if current_title:
+        lines.append(f"Current Title: {current_title}")
+    if current_company:
+        lines.append(f"Current Company: {current_company}")
+    if exp.get("target_role"):
+        lines.append(f"Target Role: {exp['target_role']}")
 
     # Availability
     lines.append(f"Available: {avail.get('earliest_start_date', 'Immediately')}")
+
+    # Skills boundary — compact facts card for screening checklists
+    skill_bits = []
+    for category, items in boundary.items():
+        if isinstance(items, list) and items:
+            skill_bits.append(f"{category}: {', '.join(items)}")
+    if skill_bits:
+        lines.append("Skills: " + " | ".join(skill_bits))
+
+    # Resume facts — companies/projects/school/metrics the agent must not invent beyond
+    companies = resume_facts.get("preserved_companies", [])
+    projects = resume_facts.get("preserved_projects", [])
+    school = resume_facts.get("preserved_school", "")
+    metrics = resume_facts.get("real_metrics", [])
+    if companies:
+        lines.append(f"Companies (exact): {', '.join(companies)}")
+    if projects:
+        lines.append(f"Projects (exact): {', '.join(projects)}")
+    if school:
+        lines.append(f"School (exact): {school}")
+    if metrics:
+        lines.append(f"Real metrics: {', '.join(metrics)}")
 
     # Standard responses
     lines.extend([
@@ -90,6 +122,23 @@ def _build_profile_summary(profile: dict) -> str:
     lines.append(f"Disability: {eeo.get('disability_status', 'I do not wish to answer')}")
 
     return "\n".join(lines)
+
+
+def _build_job_context(job: dict) -> str:
+    """Build job location + truncated description for screening answers."""
+    location = (job.get("location") or "").strip() or "Not specified"
+    desc = (job.get("full_description") or job.get("description") or "").strip()
+    if desc:
+        # Keep prompt bounded — enough for screening, not a novel
+        if len(desc) > 3500:
+            desc = desc[:3500] + "\n...[truncated]"
+    else:
+        desc = "No full description available. Infer from the page after navigate."
+
+    return f"""Location: {location}
+
+Job description (use for screening / "why this role" answers):
+{desc}"""
 
 
 def _build_location_check(profile: dict, search_config: dict) -> str:
@@ -155,7 +204,7 @@ ${floor} {currency} is the FLOOR. Never go below it. But don't always use it eit
 
 Decision tree:
 1. Job posting shows a range (e.g. "$120K-$160K")? -> Answer with the MIDPOINT ($140K).
-2. Title says Senior, Staff, Lead, Principal, Architect, or level II/III/IV? -> Minimum $110K {currency}. Use midpoint of posted range if higher.
+2. Title says Senior, Staff, Lead, Principal, Architect, or level II/III/IV? -> Minimum ${floor} {currency} (your floor). Use midpoint of posted range if higher.
 3. {convert_line}
 4. No salary info anywhere? -> Use ${floor} {currency}.
 5. Asked for a range? -> Give posted midpoint minus 10% to midpoint plus 10%. No posted range? -> "${range_min}-${range_max} {currency}".
@@ -215,206 +264,61 @@ def _build_hard_rules(profile: dict) -> str:
 
 
 def _build_captcha_section() -> str:
-    """Build the CAPTCHA detection and solving instructions.
+    """Build short CAPTCHA instructions that use the Python CapSolver helper.
 
-    Reads the CapSolver API key from environment. The CAPTCHA section
-    contains no personal data -- it's the same for every user.
+    Solving (createTask/poll) happens in Python via
+    ``python -m applypilot.apply.captcha solve``. Claude only detects and injects.
     """
-    config.load_env()
-    capsolver_key = os.environ.get("CAPSOLVER_API_KEY", "")
+    from applypilot.apply.captcha import DETECT_JS, is_configured
+
+    configured = is_configured()
+    key_status = (
+        "CapSolver is CONFIGURED — always try the API helper before giving up."
+        if configured
+        else "CapSolver is NOT CONFIGURED (no CAPSOLVER_API_KEY). Skip to MANUAL FALLBACK."
+    )
 
     return f"""== CAPTCHA ==
-You solve CAPTCHAs via the CapSolver REST API. No browser extension. You control the entire flow.
-API key: {capsolver_key or 'NOT CONFIGURED — skip to MANUAL FALLBACK for all CAPTCHAs'}
-API base: https://api.capsolver.com
+{key_status}
 
-CRITICAL RULE: When ANY CAPTCHA appears (hCaptcha, reCAPTCHA, Turnstile -- regardless of what it looks like visually), you MUST:
-1. Run CAPTCHA DETECT to get the type and sitekey
-2. Run CAPTCHA SOLVE (createTask -> poll -> inject) with the CapSolver API
-3. ONLY go to MANUAL FALLBACK if CapSolver returns errorId > 0
-Do NOT skip the API call based on what the CAPTCHA looks like. CapSolver solves CAPTCHAs server-side -- it does NOT need to see or interact with images, puzzles, or games. Even "drag the pipe" or "click all traffic lights" hCaptchas are solved via API token, not visually. ALWAYS try the API first.
+Solve CAPTCHAs with the ApplyPilot CapSolver helper — do NOT invent createTask/poll
+fetch calls yourself. CapSolver solves server-side; you never need to click puzzle images.
 
---- CAPTCHA DETECT ---
-Run this browser_evaluate after every navigation, Apply/Submit/Login click, or when a page feels stuck.
-IMPORTANT: Detection order matters. hCaptcha elements also have data-sitekey, so check hCaptcha BEFORE reCAPTCHA.
+--- DETECT ---
+After every navigation, Apply/Submit/Login click, or when a page feels stuck, run
+browser_evaluate with this exact function:
 
-browser_evaluate function: () => {{{{
-  const r = {{}};
-  const url = window.location.href;
-  // 1. hCaptcha (check FIRST -- hCaptcha uses data-sitekey too)
-  const hc = document.querySelector('.h-captcha, [data-hcaptcha-sitekey]');
-  if (hc) {{{{
-    r.type = 'hcaptcha'; r.sitekey = hc.dataset.sitekey || hc.dataset.hcaptchaSitekey;
-  }}}}
-  if (!r.type && document.querySelector('script[src*="hcaptcha.com"], iframe[src*="hcaptcha.com"]')) {{{{
-    const el = document.querySelector('[data-sitekey]');
-    if (el) {{{{ r.type = 'hcaptcha'; r.sitekey = el.dataset.sitekey; }}}}
-  }}}}
-  // 2. Cloudflare Turnstile
-  if (!r.type) {{{{
-    const cf = document.querySelector('.cf-turnstile, [data-turnstile-sitekey]');
-    if (cf) {{{{
-      r.type = 'turnstile'; r.sitekey = cf.dataset.sitekey || cf.dataset.turnstileSitekey;
-      if (cf.dataset.action) r.action = cf.dataset.action;
-      if (cf.dataset.cdata) r.cdata = cf.dataset.cdata;
-    }}}}
-  }}}}
-  if (!r.type && document.querySelector('script[src*="challenges.cloudflare.com"]')) {{{{
-    r.type = 'turnstile_script_only'; r.note = 'Wait 3s and re-detect.';
-  }}}}
-  // 3. reCAPTCHA v3 (invisible, loaded via render= param)
-  if (!r.type) {{{{
-    const s = document.querySelector('script[src*="recaptcha"][src*="render="]');
-    if (s) {{{{
-      const m = s.src.match(/render=([^&]+)/);
-      if (m && m[1] !== 'explicit') {{{{ r.type = 'recaptchav3'; r.sitekey = m[1]; }}}}
-    }}}}
-  }}}}
-  // 4. reCAPTCHA v2 (checkbox or invisible)
-  if (!r.type) {{{{
-    const rc = document.querySelector('.g-recaptcha');
-    if (rc) {{{{ r.type = 'recaptchav2'; r.sitekey = rc.dataset.sitekey; }}}}
-  }}}}
-  if (!r.type && document.querySelector('script[src*="recaptcha"]')) {{{{
-    const el = document.querySelector('[data-sitekey]');
-    if (el) {{{{ r.type = 'recaptchav2'; r.sitekey = el.dataset.sitekey; }}}}
-  }}}}
-  // 5. FunCaptcha (Arkose Labs)
-  if (!r.type) {{{{
-    const fc = document.querySelector('#FunCaptcha, [data-pkey], .funcaptcha');
-    if (fc) {{{{ r.type = 'funcaptcha'; r.sitekey = fc.dataset.pkey; }}}}
-  }}}}
-  if (!r.type && document.querySelector('script[src*="arkoselabs"], script[src*="funcaptcha"]')) {{{{
-    const el = document.querySelector('[data-pkey]');
-    if (el) {{{{ r.type = 'funcaptcha'; r.sitekey = el.dataset.pkey; }}}}
-  }}}}
-  if (r.type) {{{{ r.url = url; return r; }}}}
-  return null;
-}}}}
+browser_evaluate function: {DETECT_JS}
 
 Result actions:
-- null -> no CAPTCHA. Continue normally.
-- "turnstile_script_only" -> browser_wait_for time: 3, re-run detect.
-- Any other type -> proceed to CAPTCHA SOLVE below.
+- null -> no CAPTCHA. Continue.
+- type "turnstile_script_only" -> browser_wait_for time: 3, re-detect.
+- Any other type with sitekey -> SOLVE below.
 
---- CAPTCHA SOLVE ---
-Three steps: createTask -> poll -> inject. Do each as a separate browser_evaluate call.
+--- SOLVE (Python helper) ---
+In Bash (one command), run:
 
-STEP 1 -- CREATE TASK (copy this exactly, fill in the 3 placeholders):
-browser_evaluate function: async () => {{{{
-  const r = await fetch('https://api.capsolver.com/createTask', {{{{
-    method: 'POST',
-    headers: {{{{'Content-Type': 'application/json'}}}},
-    body: JSON.stringify({{{{
-      clientKey: '{capsolver_key}',
-      task: {{{{
-        type: 'TASK_TYPE',
-        websiteURL: 'PAGE_URL',
-        websiteKey: 'SITE_KEY'
-      }}}}
-    }}}})
-  }}}});
-  return await r.json();
-}}}}
+python -m applypilot.apply.captcha solve --type TYPE --url PAGE_URL --sitekey SITE_KEY
 
-TASK_TYPE values (use EXACTLY these strings):
-  hcaptcha     -> HCaptchaTaskProxyLess
-  recaptchav2  -> ReCaptchaV2TaskProxyLess
-  recaptchav3  -> ReCaptchaV3TaskProxyLess
-  turnstile    -> AntiTurnstileTaskProxyLess
-  funcaptcha   -> FunCaptchaTaskProxyLess
+Optional: --action PAGE_ACTION (recaptchav3 / turnstile). TYPE must be one of:
+hcaptcha, recaptchav2, recaptchav3, turnstile, funcaptcha.
 
-PAGE_URL = the url from detect result. SITE_KEY = the sitekey from detect result.
-For recaptchav3: add "pageAction": "submit" to the task object (or the actual action found in page scripts).
-For turnstile: add "metadata": {{"action": "...", "cdata": "..."}} if those were in detect result.
+The command prints JSON. On success: {{"ok": true, "token": "...", "inject_js": "() => {{...}}"}}.
+On failure: {{"ok": false, "error": "..."}} -> MANUAL FALLBACK.
 
-Response: {{"errorId": 0, "taskId": "abc123"}} on success.
-If errorId > 0 -> CAPTCHA SOLVE failed. Go to MANUAL FALLBACK.
+--- INJECT ---
+Run browser_evaluate with the inject_js function string from the JSON (verbatim).
+Then browser_wait_for time: 2, snapshot. If the widget clears, continue. If not,
+click Submit/Verify once. Token expired (~2 min)? Re-run SOLVE from scratch.
 
-STEP 2 -- POLL (replace TASK_ID with the taskId from step 1):
-Loop: browser_wait_for time: 3, then run:
-browser_evaluate function: async () => {{{{
-  const r = await fetch('https://api.capsolver.com/getTaskResult', {{{{
-    method: 'POST',
-    headers: {{{{'Content-Type': 'application/json'}}}},
-    body: JSON.stringify({{{{
-      clientKey: '{capsolver_key}',
-      taskId: 'TASK_ID'
-    }}}})
-  }}}});
-  return await r.json();
-}}}}
-
-- status "processing" -> wait 3s, poll again. Max 10 polls (30s).
-- status "ready" -> extract token:
-    reCAPTCHA: solution.gRecaptchaResponse
-    hCaptcha:  solution.gRecaptchaResponse
-    Turnstile: solution.token
-- errorId > 0 or 30s timeout -> MANUAL FALLBACK.
-
-STEP 3 -- INJECT TOKEN (replace THE_TOKEN with actual token string):
-
-For reCAPTCHA v2/v3:
-browser_evaluate function: () => {{{{
-  const token = 'THE_TOKEN';
-  document.querySelectorAll('[name="g-recaptcha-response"]').forEach(el => {{{{ el.value = token; el.style.display = 'block'; }}}});
-  if (window.___grecaptcha_cfg) {{{{
-    const clients = window.___grecaptcha_cfg.clients;
-    for (const key in clients) {{{{
-      const walk = (obj, d) => {{{{
-        if (d > 4 || !obj) return;
-        for (const k in obj) {{{{
-          if (typeof obj[k] === 'function' && k.length < 3) try {{{{ obj[k](token); }}}} catch(e) {{{{}}}}
-          else if (typeof obj[k] === 'object') walk(obj[k], d+1);
-        }}}}
-      }}}};
-      walk(clients[key], 0);
-    }}}}
-  }}}}
-  return 'injected';
-}}}}
-
-For hCaptcha:
-browser_evaluate function: () => {{{{
-  const token = 'THE_TOKEN';
-  const ta = document.querySelector('[name="h-captcha-response"], textarea[name*="hcaptcha"]');
-  if (ta) ta.value = token;
-  document.querySelectorAll('iframe[data-hcaptcha-response]').forEach(f => f.setAttribute('data-hcaptcha-response', token));
-  const cb = document.querySelector('[data-hcaptcha-widget-id]');
-  if (cb && window.hcaptcha) try {{{{ window.hcaptcha.getResponse(cb.dataset.hcaptchaWidgetId); }}}} catch(e) {{{{}}}}
-  return 'injected';
-}}}}
-
-For Turnstile:
-browser_evaluate function: () => {{{{
-  const token = 'THE_TOKEN';
-  const inp = document.querySelector('[name="cf-turnstile-response"], input[name*="turnstile"]');
-  if (inp) inp.value = token;
-  if (window.turnstile) try {{{{ const w = document.querySelector('.cf-turnstile'); if (w) window.turnstile.getResponse(w); }}}} catch(e) {{{{}}}}
-  return 'injected';
-}}}}
-
-For FunCaptcha:
-browser_evaluate function: () => {{{{
-  const token = 'THE_TOKEN';
-  const inp = document.querySelector('#FunCaptcha-Token, input[name="fc-token"]');
-  if (inp) inp.value = token;
-  if (window.ArkoseEnforcement) try {{{{ window.ArkoseEnforcement.setConfig({{{{data: {{{{blob: token}}}}}}}}) }}}} catch(e) {{{{}}}}
-  return 'injected';
-}}}}
-
-After injecting: browser_wait_for time: 2, then snapshot.
-- Widget gone or green check -> success. Click Submit if needed.
-- No change -> click Submit/Verify/Continue button (some sites need it).
-- Still stuck -> token may have expired (~2 min lifetime). Re-run from STEP 1.
+browser_evaluate is ALLOWED for CAPTCHA detect and inject. It is NOT allowed for
+filling normal form fields (see FORM INTERACTION SAFETY).
 
 --- MANUAL FALLBACK ---
-You should ONLY be here if CapSolver createTask returned errorId > 0. If you haven't tried CapSolver yet, GO BACK and try it first.
-If CapSolver genuinely failed (errorId > 0):
-1. Audio challenge: Look for "audio" or "accessibility" button -> click it for an easier challenge.
-2. Text/logic puzzles: Solve them yourself. Think step by step. Common tricks: "All but 9 die" = 9 left. "3 sisters and 4 brothers, how many siblings?" = 7.
-3. Simple text captchas ("What is 3+7?", "Type the word") -> solve them.
-4. All else fails -> Output RESULT:CAPTCHA."""
+Only if CapSolver is not configured or the helper returned ok:false:
+1. Audio/accessibility challenge if present.
+2. Simple text/math captchas — solve them.
+3. Otherwise -> RESULT:CAPTCHA."""
 
 
 def build_prompt(job: dict, tailored_resume: str,
@@ -478,6 +382,7 @@ def build_prompt(job: dict, tailored_resume: str,
 
     # --- Build all prompt sections ---
     profile_summary = _build_profile_summary(profile)
+    job_context = _build_job_context(job)
     location_check = _build_location_check(profile, search_config)
     salary_section = _build_salary_section(profile)
     screening_section = _build_screening_section(profile)
@@ -524,6 +429,7 @@ URL: {job_url}
 Title: {job['title']}
 Company: {job.get('site', 'Unknown')}
 Fit Score: {job.get('fit_score', 'N/A')}/10
+{job_context}
 
 == FILES ==
 Resume PDF (upload this): {pdf_path}
@@ -541,7 +447,7 @@ Cover Letter PDF (upload if asked): {cl_upload_path or "N/A"}
 == YOUR MISSION ==
 Submit a complete, accurate application. Use the profile and resume as source data -- adapt to fit each form's format.
 
-If something unexpected happens and these instructions don't cover it, figure it out yourself. You are autonomous. Navigate pages, read content, try buttons, explore the site. The goal is always the same: submit the application. Do whatever it takes to reach that goal.
+If something unexpected happens and these instructions don't cover it, figure it out yourself. You are autonomous. Navigate pages, read content, try buttons, explore the site. The goal is always the same: submit the application. Do whatever it takes to reach that goal — except never violate HARD RULES or NEVER DO THESE.
 
 {hard_rules}
 
@@ -586,9 +492,8 @@ question:
 4. For a location or office combobox, open the control, choose the exact
    visible option, and verify the chosen value is displayed in the field.
 5. Never set checked, aria-checked, aria-pressed, class names, hidden input
-   values, or React internals with browser_evaluate. DOM mutation can look
-   successful while leaving React form state unchanged. browser_evaluate may
-   only be used to inspect the field structure or scroll it into view.
+   values, or React internals with browser_evaluate for normal form fields.
+   DOM mutation can look successful while leaving React form state unchanged.
 6. Only submit after every required field has a confirmed value. If a submit
    attempt returns validation errors, fix each named field one at a time and
    re-check its state; do not repeat the same broad click script. If the same
@@ -622,7 +527,7 @@ question:
      prefilled LinkedIn email with the profile email unless the form explicitly
      permits it and the two addresses are known to be the same account. Keep
      the account email consistent through review and submission.
-9. Answer screening questions using the rules above.
+9. Answer screening questions using the rules above. Prefer facts from APPLICANT PROFILE (skills, companies, school) over inventing details.
 10. {submit_instruction}
 11. After submit: browser_snapshot. Run CAPTCHA DETECT -- submit buttons often trigger invisible CAPTCHAs. If found, solve it (the form will auto-submit once the token clears, or you may need to click Submit again). Then check for new tabs (browser_tabs action: "list"). Switch to newest, close old. Snapshot to confirm submission. Look for "thank you" or "application received".
 12. Output your result.
@@ -637,13 +542,19 @@ RESULT:FAILED:not_eligible_work_auth -- requires unauthorized work location
 RESULT:FAILED:reason -- any other failure (brief reason)
 
 == FORM INTERACTION SAFETY ==
-- Use browser_fill_form for text inputs and browser_click for labels, buttons,
-  radios, checkboxes, tabs, and select options. Use browser_file_upload for
-  files. These are the supported user-level interactions.
-- Do not use browser_evaluate to set values, click controls, dispatch events,
-  submit forms, modify classes/attributes, or alter React state. It is allowed
-  only for read-only inspection, finding a scroll position, or checking whether
-  an iframe/shadow root exists.
+- Prefer native interactions: browser_click, browser_type, browser_select_option,
+  browser_file_upload, and browser_fill_form for ordinary text inputs.
+- For multi-step ATS (Workday, Greenhouse, Lever, Taleo, iCIMS): fill the
+  visible page's fields, verify, click Next/Continue, then snapshot the next
+  page. Do NOT try to fill every field on every step in one giant call.
+- Custom React radios/button groups: one control at a time with snapshot
+  verification (see CUSTOM FORM STATE RECOVERY). Do not bulk-fill those.
+- browser_evaluate is allowed ONLY for:
+  (1) CAPTCHA detect / inject (see CAPTCHA section),
+  (2) read-only inspection (field structure, iframe/shadow root presence),
+  (3) scrolling a control into view.
+  Never use browser_evaluate to set normal form values, click controls,
+  dispatch events, submit forms, or patch React state.
 - Do not use JavaScript to submit the form or to force a button click. A DOM
   change is not a successful form interaction if the application state did not
   update.
@@ -651,10 +562,10 @@ RESULT:FAILED:reason -- any other failure (brief reason)
 == BROWSER EFFICIENCY ==
 - browser_snapshot ONCE per page to understand it. Then use browser_take_screenshot to check results (10x less memory).
 - Only snapshot again when you need element refs to click/fill.
-- Multi-page forms (Workday, Taleo, iCIMS): snapshot each new page, fill all fields, click Next/Continue. Repeat until final review page.
-- Fill ALL fields in ONE browser_fill_form call. Not one at a time.
+- Multi-page forms: snapshot each new page, fill that page's fields, click Next/Continue. Repeat until final review page.
+- Group simple text inputs with browser_fill_form when they are native inputs on the same page. Handle radios, custom widgets, and dropdowns individually.
 - Keep your thinking SHORT. Don't repeat page structure back.
-- CAPTCHA AWARENESS: After any navigation, Apply/Submit/Login click, or when a page feels stuck -- run CAPTCHA DETECT (see CAPTCHA section). Invisible CAPTCHAs (Turnstile, reCAPTCHA v3) show NO visual widget but block form submissions silently. The detect script finds them even when invisible.
+- CAPTCHA AWARENESS: After any navigation, Apply/Submit/Login click, or when a page feels stuck -- run CAPTCHA DETECT. Invisible CAPTCHAs (Turnstile, reCAPTCHA v3) show NO visual widget but block form submissions silently.
 
 == FORM TRICKS ==
 - Popup/new window opened? browser_tabs action "list" to see all tabs. browser_tabs action "select" with the tab index to switch. ALWAYS check for new tabs after clicking login/apply/sign-in buttons.

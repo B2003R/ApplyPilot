@@ -19,6 +19,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
+from queue import Empty, Queue
 
 from rich.console import Console
 from rich.live import Live
@@ -365,6 +366,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
     )
 
     start = time.time()
+    apply_timeout = int(config.DEFAULTS.get("apply_timeout", 300))
     stats: dict = {}
     proc = None
 
@@ -387,11 +389,39 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         proc.stdin.close()
 
         text_parts: list[str] = []
+        timed_out = False
+        line_queue: Queue[str | None] = Queue()
+
+        def _reader() -> None:
+            try:
+                for raw in proc.stdout:
+                    line_queue.put(raw)
+            finally:
+                line_queue.put(None)  # sentinel
+
+        reader = threading.Thread(target=_reader, daemon=True, name=f"claude-stdout-{worker_id}")
+        reader.start()
+
         with open(worker_log, "a", encoding="utf-8") as lf:
             lf.write(log_header)
 
-            for line in proc.stdout:
-                line = line.strip()
+            while True:
+                remaining = apply_timeout - (time.time() - start)
+                if remaining <= 0:
+                    timed_out = True
+                    lf.write(f"\n[applypilot] wall-clock timeout after {apply_timeout}s\n")
+                    _kill_process_tree(proc.pid)
+                    break
+
+                try:
+                    raw = line_queue.get(timeout=min(1.0, max(remaining, 0.1)))
+                except Empty:
+                    continue
+
+                if raw is None:
+                    break
+
+                line = raw.strip()
                 if not line:
                     continue
                 try:
@@ -441,7 +471,19 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                     text_parts.append(line)
                     lf.write(line + "\n")
 
-        proc.wait(timeout=300)
+        reader.join(timeout=5)
+        if timed_out:
+            duration_ms = int((time.time() - start) * 1000)
+            elapsed = int(time.time() - start)
+            add_event(f"[W{worker_id}] TIMEOUT ({elapsed}s)")
+            update_state(worker_id, status="failed", last_action=f"TIMEOUT ({elapsed}s)")
+            return "failed:timeout", duration_ms
+
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            _kill_process_tree(proc.pid)
+            proc.wait(timeout=5)
         returncode = proc.returncode
         proc = None
 
@@ -520,7 +562,9 @@ def run_job(job: dict, port: int, worker_id: int = 0,
 # ---------------------------------------------------------------------------
 
 PERMANENT_FAILURES: set[str] = {
-    "expired", "captcha", "login_issue",
+    # CAPTCHA and login_issue are intentionally NOT permanent — retry while
+    # apply_attempts < max_apply_attempts (transient solver/session failures).
+    "expired",
     "not_eligible_location", "not_eligible_salary",
     "already_applied", "account_required",
     "not_a_job_application", "unsafe_permissions",

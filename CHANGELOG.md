@@ -5,6 +5,16 @@ All notable changes to ApplyPilot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Apply form-fill reliability** — default Claude model is now `sonnet` (was `haiku`);
+  CapSolver runs in Python (`python -m applypilot.apply.captcha`) instead of an 8KB
+  prompt ritual; prompt no longer contradicts itself on `browser_evaluate` vs bulk fill;
+  job description, location, skills, and resume facts are injected into the apply prompt;
+  wall-clock `apply_timeout` kills hung Claude sessions mid-run; CAPTCHA/login failures
+  are retryable instead of permanent one-strikes; expanded `manual_ats` skip list
+
 ## [0.2.0] - 2026-02-17
 
 ### Added
