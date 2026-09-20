@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Conditional Field Reveal</title></head>
+<body data-application-state="application_form">
+  <form id="cond-form">
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" autocomplete="email" required>
+
+    <fieldset>
+      <legend>Do you require sponsorship?</legend>
+      <label><input type="radio" name="sponsor" value="No" id="sponsor-no"> No</label>
+      <label><input type="radio" name="sponsor" value="Yes" id="sponsor-yes"> Yes</label>
+    </fieldset>
+
+    <div id="visa-details" hidden>
+      <label for="visa-type">Work Permit Type</label>
+      <input id="visa-type" name="visa_type" required>
+    </div>
+
+    <button type="submit">Submit</button>
+  </form>
+  <script>
+    document.querySelectorAll('input[name=sponsor]').forEach(r => {
+      r.addEventListener('change', () => {
+        const show = document.getElementById('sponsor-yes').checked;
+        const box = document.getElementById('visa-details');
+        box.hidden = !show;
+        document.getElementById('visa-type').required = show;
+      });
+    });
+  </script>
+</body>
+</html>

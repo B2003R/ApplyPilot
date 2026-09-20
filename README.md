@@ -36,9 +36,14 @@ applypilot run -w 4      # same but parallel (4 threads for discovery/enrichment
 applypilot apply         # autonomous browser-driven submission
 applypilot apply -w 3    # parallel apply (3 Chrome instances)
 applypilot apply --dry-run  # fill forms without submitting
+applypilot apply --form-engine --dry-run  # opt-in ATS form engine (CDP; Claude path unchanged by default)
 ```
 
 > **Why two install commands?** `python-jobspy` pins an exact numpy version in its metadata that conflicts with pip's resolver, but works fine at runtime with any modern numpy. The `--no-deps` flag bypasses the resolver; the second command installs jobspy's actual runtime dependencies. Everything except `python-jobspy` installs normally.
+
+### Optional form engine
+
+ApplyPilot’s default apply path still uses Claude Code + Playwright MCP. An **opt-in** deterministic form engine (`application_engine.enabled`, or `--form-engine`) attaches Playwright to the same Chrome CDP worker, fills via ATS adapters + semantic matching, and only uses constrained LLM JSON for unresolved fields. Auto-submit defaults to off. Details: [docs/form-engine.md](docs/form-engine.md).
 
 ---
 

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Workday Combobox</title></head>
+<body data-ats="workday" data-application-state="application_form">
+  <label id="country-label" for="country-combo">Country</label>
+  <div>
+    <input id="country-combo" role="combobox" aria-labelledby="country-label"
+           aria-expanded="false" autocomplete="country" data-automation-id="countryDropdown">
+    <ul role="listbox" id="country-list" hidden>
+      <li role="option">Canada</li>
+      <li role="option">United States</li>
+      <li role="option">United Kingdom</li>
+    </ul>
+  </div>
+  <script>
+    const input = document.getElementById('country-combo');
+    const list = document.getElementById('country-list');
+    input.addEventListener('click', () => {
+      list.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+    });
+    list.querySelectorAll('[role=option]').forEach(opt => {
+      opt.addEventListener('click', () => {
+        input.value = opt.textContent;
+        list.querySelectorAll('[role=option]').forEach(o => o.removeAttribute('aria-selected'));
+        opt.setAttribute('aria-selected', 'true');
+        list.hidden = true;
+        input.setAttribute('aria-expanded', 'false');
+      });
+    });
+  </script>
+</body>
+</html>

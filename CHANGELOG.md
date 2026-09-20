@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Opt-in ATS form engine** — modular Playwright-over-CDP form filler under
+  `applypilot.apply.form_engine` (Greenhouse/Lever fixture-tested; Ashby/Workday
+  detection+scan framework). Disabled by default; enable via
+  `application_engine.enabled` or `applypilot apply --form-engine`.
+  See [docs/form-engine.md](docs/form-engine.md) and [docs/form-engine-plan.md](docs/form-engine-plan.md).
+- **Form-engine SQLite tables** — `application_runs`, `application_field_events`,
+  `learned_field_mappings`, `application_submission_evidence` (+ optional
+  `jobs.form_engine_run_id`).
+- **Fixture-driven form-engine test suite** under `tests/form_engine/`.
+
 ### Fixed
 - **Apply form-fill reliability** — default Claude model is now `sonnet` (was `haiku`);
   CapSolver runs in Python (`python -m applypilot.apply.captcha`) instead of an 8KB

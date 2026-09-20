@@ -160,11 +160,19 @@ def apply(
     mark_failed: Optional[str] = typer.Option(None, "--mark-failed", help="Manually mark a job URL as failed (provide URL)."),
     fail_reason: Optional[str] = typer.Option(None, "--fail-reason", help="Reason for --mark-failed."),
     reset_failed: bool = typer.Option(False, "--reset-failed", help="Reset all failed jobs for retry."),
+    form_engine: Optional[bool] = typer.Option(
+        None,
+        "--form-engine/--no-form-engine",
+        help=(
+            "Use the opt-in ATS form engine (Playwright over CDP) instead of Claude Code. "
+            "Default follows application_engine.enabled (false)."
+        ),
+    ),
 ) -> None:
     """Launch auto-apply to submit job applications."""
     _bootstrap()
 
-    from applypilot.config import check_tier, PROFILE_PATH as _profile_path
+    from applypilot.config import check_tier, PROFILE_PATH as _profile_path, load_application_engine_config
     from applypilot.database import get_connection
 
     # --- Utility modes (no Chrome/Claude needed) ---
@@ -189,8 +197,12 @@ def apply(
 
     # --- Full apply mode ---
 
-    # Check 1: Tier 3 required (Claude Code CLI + Chrome)
-    check_tier(3, "auto-apply")
+    use_form_engine = form_engine
+    if use_form_engine is None:
+        use_form_engine = bool(load_application_engine_config().get("enabled", False))
+
+    # Check 1: Tier 3 required (Chrome + Claude Code, or form engine + Chrome)
+    check_tier(3, "auto-apply", form_engine=use_form_engine)
 
     # Check 2: Profile exists
     if not _profile_path.exists():
@@ -243,6 +255,7 @@ def apply(
     console.print(f"  Model:    {model}")
     console.print(f"  Headless: {headless}")
     console.print(f"  Dry run:  {dry_run}")
+    console.print(f"  Form engine: {use_form_engine}")
     if url:
         console.print(f"  Target:   {url}")
     console.print()
@@ -256,6 +269,7 @@ def apply(
         dry_run=dry_run,
         continuous=continuous,
         workers=workers,
+        form_engine=use_form_engine,
     )
 
 

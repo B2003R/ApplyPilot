@@ -1,0 +1,21 @@
+# Opt-in ATS-aware form-filling engine (defaults preserve Claude apply path)
+enabled: false
+auto_submit: false
+use_llm_fallback: true
+diagnostic_mode: false
+trace_on_failure: true
+screenshot_on_failure: true
+adapter_threshold: 0.85
+generic_autofill_threshold: 0.95
+llm_classification_threshold: 0.60
+max_action_retries: 2
+max_state_transitions: 30
+allow_narrative_auto_fill: false
+require_review_for_sensitive_fields: true
+require_review_for_salary: true
+supported_ats:
+  - greenhouse
+  - lever
+  - ashby
+  - workday
+  - generic

@@ -129,13 +129,15 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             last_attempted_at     TEXT,
             apply_duration_ms     INTEGER,
             apply_task_id         TEXT,
-            verification_confidence TEXT
+            verification_confidence TEXT,
+            form_engine_run_id    TEXT
         )
     """)
     conn.commit()
 
     # Run migrations for any columns added after initial schema
     ensure_columns(conn)
+    ensure_form_engine_tables(conn)
     conn.execute("""
         UPDATE jobs
         SET application_url = NULL
@@ -186,7 +188,93 @@ _ALL_COLUMNS: dict[str, str] = {
     "apply_duration_ms": "INTEGER",
     "apply_task_id": "TEXT",
     "verification_confidence": "TEXT",
+    "form_engine_run_id": "TEXT",
 }
+
+
+def ensure_form_engine_tables(conn: sqlite3.Connection | None = None) -> None:
+    """Create form-engine persistence tables (idempotent).
+
+    Stores run metadata, field events (without raw PII dumps), learned
+    mappings, and submission evidence. Safe to call on every startup.
+    """
+    if conn is None:
+        conn = get_connection()
+
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS application_runs (
+            run_id                TEXT PRIMARY KEY,
+            job_url               TEXT,
+            job_title             TEXT,
+            company               TEXT,
+            ats_name              TEXT,
+            detection_confidence  REAL,
+            status                TEXT,
+            stage                 TEXT,
+            page_url              TEXT,
+            diagnostics_dir       TEXT,
+            trace_path            TEXT,
+            screenshot_path       TEXT,
+            error_message         TEXT,
+            created_at            TEXT,
+            updated_at            TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS application_field_events (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id                TEXT NOT NULL,
+            field_signature       TEXT,
+            field_id              TEXT,
+            category              TEXT,
+            action_type           TEXT,
+            outcome               TEXT,
+            confidence            REAL,
+            value_source          TEXT,
+            unresolved_reason     TEXT,
+            requires_review       INTEGER DEFAULT 0,
+            created_at            TEXT,
+            FOREIGN KEY (run_id) REFERENCES application_runs(run_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS learned_field_mappings (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            ats_name              TEXT,
+            company_domain        TEXT,
+            job_url               TEXT,
+            field_signature       TEXT NOT NULL,
+            field_category        TEXT NOT NULL,
+            profile_path          TEXT,
+            scope                 TEXT NOT NULL,
+            confidence            REAL DEFAULT 0.5,
+            successful_uses       INTEGER DEFAULT 0,
+            user_confirmed        INTEGER DEFAULT 0,
+            created_at            TEXT,
+            updated_at            TEXT,
+            UNIQUE (scope, ats_name, company_domain, job_url, field_signature)
+        );
+
+        CREATE TABLE IF NOT EXISTS application_submission_evidence (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id                TEXT NOT NULL,
+            result                TEXT NOT NULL,
+            confirmation_text     TEXT,
+            confirmation_url      TEXT,
+            confirmation_id       TEXT,
+            evidence_json         TEXT,
+            created_at            TEXT,
+            FOREIGN KEY (run_id) REFERENCES application_runs(run_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_field_events_run
+            ON application_field_events(run_id);
+        CREATE INDEX IF NOT EXISTS idx_learned_sig
+            ON learned_field_mappings(field_signature);
+        CREATE INDEX IF NOT EXISTS idx_runs_job
+            ON application_runs(job_url);
+        """
+    )
+    conn.commit()
 
 
 def ensure_columns(conn: sqlite3.Connection | None = None) -> list[str]:

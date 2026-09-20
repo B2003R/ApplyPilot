@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Greenhouse Custom Questions</title></head>
+<body data-ats="greenhouse" data-application-state="application_form">
+  <form id="application_form">
+    <label for="first_name">First Name</label>
+    <input id="first_name" name="first_name" autocomplete="given-name" required>
+
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" autocomplete="email" required>
+
+    <fieldset>
+      <legend>Work Authorization</legend>
+      <label><input type="radio" name="work_auth" value="Yes" required> Yes</label>
+      <label><input type="radio" name="work_auth" value="No"> No</label>
+    </fieldset>
+
+    <label for="why_us">Why do you want to work with us?</label>
+    <textarea id="why_us" name="why_us" required></textarea>
+
+    <label for="salary">Salary Expectation</label>
+    <input id="salary" name="salary" type="text">
+
+    <button type="submit" id="submit_app">Submit Application</button>
+  </form>
+</body>
+</html>
