@@ -592,7 +592,8 @@ def _is_permanent_failure(result: str) -> bool:
 def worker_loop(worker_id: int = 0, limit: int = 1,
                 target_url: str | None = None,
                 min_score: int = 7, headless: bool = False,
-                model: str = "sonnet", dry_run: bool = False) -> tuple[int, int]:
+                model: str = "sonnet", dry_run: bool = False,
+                form_engine: bool | None = None) -> tuple[int, int]:
     """Run jobs sequentially until limit is reached or queue is empty.
 
     Args:
@@ -603,6 +604,8 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
         headless: Run Chrome headless.
         model: Claude model name.
         dry_run: Don't click Submit.
+        form_engine: When True, use the opt-in form engine over CDP instead of
+            Claude Code. When None, read application_engine.enabled from config.
 
     Returns:
         Tuple of (applied_count, failed_count).
@@ -645,8 +648,24 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
             add_event(f"[W{worker_id}] Launching Chrome...")
             chrome_proc = launch_chrome(worker_id, port=port, headless=headless)
 
-            result, duration_ms = run_job(job, port=port, worker_id=worker_id,
-                                            model=model, dry_run=dry_run)
+            use_form_engine = form_engine
+            if use_form_engine is None:
+                use_form_engine = bool(
+                    config.load_application_engine_config().get("enabled", False)
+                )
+
+            if use_form_engine:
+                from applypilot.apply.form_engine import run_form_engine_job
+
+                add_event(f"[W{worker_id}] Form engine (CDP:{port})")
+                result, duration_ms = run_form_engine_job(
+                    job, port=port, worker_id=worker_id, dry_run=dry_run,
+                )
+            else:
+                result, duration_ms = run_job(
+                    job, port=port, worker_id=worker_id,
+                    model=model, dry_run=dry_run,
+                )
 
             if result == "skipped":
                 release_lock(job["url"])
@@ -697,7 +716,8 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
 def main(limit: int = 1, target_url: str | None = None,
          min_score: int = 7, headless: bool = False, model: str = "sonnet",
          dry_run: bool = False, continuous: bool = False,
-         poll_interval: int = 60, workers: int = 1) -> None:
+         poll_interval: int = 60, workers: int = 1,
+         form_engine: bool | None = None) -> None:
     """Launch the apply pipeline.
 
     Args:
@@ -710,6 +730,7 @@ def main(limit: int = 1, target_url: str | None = None,
         continuous: Run forever, polling for new jobs.
         poll_interval: Seconds between DB polls when queue is empty.
         workers: Number of parallel workers (default 1).
+        form_engine: Opt into CDP form engine (None = config default).
     """
     global POLL_INTERVAL
     POLL_INTERVAL = poll_interval
@@ -781,6 +802,7 @@ def main(limit: int = 1, target_url: str | None = None,
                     headless=headless,
                     model=model,
                     dry_run=dry_run,
+                    form_engine=form_engine,
                 )
             else:
                 # Multi-worker — distribute limit across workers
@@ -804,6 +826,7 @@ def main(limit: int = 1, target_url: str | None = None,
                             headless=headless,
                             model=model,
                             dry_run=dry_run,
+                            form_engine=form_engine,
                         ): i
                         for i in range(workers)
                     }
