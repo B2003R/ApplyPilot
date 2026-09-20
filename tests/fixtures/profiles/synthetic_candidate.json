@@ -1,0 +1,61 @@
+{
+  "personal": {
+    "full_name": "Ada Testington",
+    "preferred_name": "Ada",
+    "email": "ada.testington@example.com",
+    "password": "not-a-real-password",
+    "phone": "555-0100",
+    "address": "1 Test Street",
+    "city": "Testville",
+    "province_state": "TS",
+    "country": "Canada",
+    "postal_code": "T1T 1T1",
+    "linkedin_url": "https://www.linkedin.com/in/adatest",
+    "github_url": "https://github.com/adatest",
+    "portfolio_url": "",
+    "website_url": ""
+  },
+  "work_authorization": {
+    "legally_authorized_to_work": "Yes",
+    "require_sponsorship": "No",
+    "work_permit_type": ""
+  },
+  "availability": {
+    "earliest_start_date": "Immediately",
+    "available_for_full_time": "Yes",
+    "available_for_contract": "No"
+  },
+  "compensation": {
+    "salary_expectation": "90000",
+    "salary_currency": "USD",
+    "salary_range_min": "85000",
+    "salary_range_max": "100000",
+    "currency_conversion_note": ""
+  },
+  "experience": {
+    "years_of_experience_total": "5",
+    "education_level": "Bachelor's Degree",
+    "current_job_title": "Software Engineer",
+    "current_company": "Example Corp",
+    "target_role": "software engineer"
+  },
+  "skills_boundary": {
+    "languages": ["Python", "TypeScript"],
+    "frameworks": ["FastAPI", "React"],
+    "devops": ["Docker"],
+    "databases": ["PostgreSQL"],
+    "tools": ["Git"]
+  },
+  "resume_facts": {
+    "preserved_companies": ["Example Corp"],
+    "preserved_projects": ["Test Project"],
+    "preserved_school": "Test University",
+    "real_metrics": ["2x throughput"]
+  },
+  "eeo_voluntary": {
+    "gender": "Decline to self-identify",
+    "race_ethnicity": "Decline to self-identify",
+    "veteran_status": "I am not a protected veteran",
+    "disability_status": "I do not wish to answer"
+  }
+}

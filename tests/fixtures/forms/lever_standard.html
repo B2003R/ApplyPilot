@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Lever — Jobs at Example</title></head>
+<body data-ats="lever" data-application-state="application_form">
+  <div class="application-page">
+    <form class="application-form">
+      <label for="name">Full Name</label>
+      <input id="name" name="name" autocomplete="name" required>
+
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="email" required>
+
+      <label for="phone">Phone</label>
+      <input id="phone" name="phone" type="tel" autocomplete="tel">
+
+      <label for="urls-linkedin">LinkedIn URL</label>
+      <input id="urls-linkedin" name="urls[LinkedIn]" type="url">
+
+      <div id="resume-upload">
+        <label for="resume-upload-input">Resume</label>
+        <input id="resume-upload-input" name="resume" type="file">
+      </div>
+
+      <label for="org">Current Company</label>
+      <input id="org" name="org" autocomplete="organization">
+
+      <button type="submit" data-qa="btn-submit">Submit application</button>
+    </form>
+  </div>
+</body>
+</html>

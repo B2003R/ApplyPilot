@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Generic Semantic Form</title></head>
+<body data-ats="generic" data-application-state="application_form">
+  <form>
+    <label for="given">First Name</label>
+    <input id="given" name="applicant_first" autocomplete="given-name" required>
+
+    <label for="family">Last Name</label>
+    <input id="family" name="applicant_last" autocomplete="family-name" required>
+
+    <label for="mail">Email Address</label>
+    <input id="mail" name="applicant_email" type="email" autocomplete="email" required>
+
+    <label for="tel">Mobile Phone</label>
+    <input id="tel" name="mobile_phone" type="tel" autocomplete="tel">
+
+    <label for="city">City</label>
+    <input id="city" name="city" autocomplete="address-level2">
+
+    <label for="gh">GitHub</label>
+    <input id="gh" name="github_url" type="url">
+
+    <label for="how">How did you hear about us?</label>
+    <select id="how" name="source">
+      <option value="">Select</option>
+      <option>Online Job Board</option>
+      <option>LinkedIn</option>
+      <option>Referral</option>
+    </select>
+
+    <button type="submit">Submit</button>
+  </form>
+</body>
+</html>

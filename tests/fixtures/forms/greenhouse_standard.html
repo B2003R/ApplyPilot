@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Greenhouse Job Application</title></head>
+<body data-ats="greenhouse" data-application-state="application_form">
+  <h1>Software Engineer</h1>
+  <form id="application_form" class="accessible">
+    <label for="first_name">First Name</label>
+    <input id="first_name" name="first_name" autocomplete="given-name" required data-field="first_name">
+
+    <label for="last_name">Last Name</label>
+    <input id="last_name" name="last_name" autocomplete="family-name" required>
+
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" autocomplete="email" required>
+
+    <label for="phone">Phone</label>
+    <input id="phone" name="phone" type="tel" autocomplete="tel">
+
+    <label for="linkedin">LinkedIn Profile</label>
+    <input id="linkedin" name="job_application[linkedin]" type="url">
+
+    <label for="resume">Resume</label>
+    <input id="resume" name="resume" type="file">
+
+    <button type="submit" id="submit_app">Submit Application</button>
+  </form>
+</body>
+</html>
