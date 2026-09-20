@@ -29,6 +29,10 @@ APPLY_WORKER_DIR = APP_DIR / "apply-workers"
 PACKAGE_DIR = Path(__file__).parent
 CONFIG_DIR = PACKAGE_DIR / "config"
 
+# Form-engine diagnostics (local paths only; never uploaded)
+FORM_ENGINE_DIAG_DIR = APP_DIR / "form-engine-diagnostics"
+APPLICATION_ENGINE_USER_PATH = APP_DIR / "application_engine.yaml"
+
 
 def optional_url(value: object) -> str | None:
     """Return a usable URL or None for missing/sentinel values."""
@@ -97,7 +101,15 @@ def get_chrome_user_data() -> Path:
 
 def ensure_dirs():
     """Create all required directories."""
-    for d in [APP_DIR, TAILORED_DIR, COVER_LETTER_DIR, LOG_DIR, CHROME_WORKER_DIR, APPLY_WORKER_DIR]:
+    for d in [
+        APP_DIR,
+        TAILORED_DIR,
+        COVER_LETTER_DIR,
+        LOG_DIR,
+        CHROME_WORKER_DIR,
+        APPLY_WORKER_DIR,
+        FORM_ENGINE_DIAG_DIR,
+    ]:
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -178,7 +190,59 @@ DEFAULTS = {
     "poll_interval": 60,
     "apply_timeout": 300,
     "viewport": "1280x900",
+    # Opt-in ATS form engine (disabled by default — Claude apply path unchanged)
+    "application_engine": {
+        "enabled": False,
+        "auto_submit": False,
+        "use_llm_fallback": True,
+        "diagnostic_mode": False,
+        "trace_on_failure": True,
+        "screenshot_on_failure": True,
+        "adapter_threshold": 0.85,
+        "generic_autofill_threshold": 0.95,
+        "llm_classification_threshold": 0.60,
+        "max_action_retries": 2,
+        "max_state_transitions": 30,
+        "allow_narrative_auto_fill": False,
+        "require_review_for_sensitive_fields": True,
+        "require_review_for_salary": True,
+        "supported_ats": ["greenhouse", "lever", "ashby", "workday", "generic"],
+    },
 }
+
+
+def load_application_engine_config() -> dict:
+    """Load application_engine settings (package YAML < DEFAULTS < user YAML).
+
+    Returns a flat dict of engine settings. Defaults keep the engine disabled
+    so existing Claude Code apply behavior is unchanged.
+    """
+    import copy
+
+    import yaml
+
+    cfg = copy.deepcopy(DEFAULTS["application_engine"])
+
+    package_path = CONFIG_DIR / "application_engine.yaml"
+    if package_path.exists():
+        loaded = yaml.safe_load(package_path.read_text(encoding="utf-8")) or {}
+        if isinstance(loaded, dict):
+            cfg.update(loaded)
+
+    if APPLICATION_ENGINE_USER_PATH.exists():
+        user_loaded = yaml.safe_load(
+            APPLICATION_ENGINE_USER_PATH.read_text(encoding="utf-8")
+        ) or {}
+        if isinstance(user_loaded, dict):
+            # Allow either nested {application_engine: {...}} or flat keys
+            if "application_engine" in user_loaded and isinstance(
+                user_loaded["application_engine"], dict
+            ):
+                cfg.update(user_loaded["application_engine"])
+            else:
+                cfg.update(user_loaded)
+
+    return cfg
 
 
 def load_env():
@@ -207,12 +271,17 @@ TIER_COMMANDS: dict[int, list[str]] = {
 }
 
 
-def get_tier() -> int:
+def get_tier(*, form_engine: bool | None = None) -> int:
     """Detect the current tier based on available dependencies.
 
     Tier 1 (Discovery):            Python + pip
     Tier 2 (AI Scoring & Tailoring): + LLM API key
-    Tier 3 (Full Auto-Apply):       + Claude Code CLI + Chrome
+    Tier 3 (Full Auto-Apply):       + Chrome, and either Claude Code CLI
+                                    or the opt-in form engine
+
+    Args:
+        form_engine: When True, Chrome alone (with Playwright) satisfies Tier 3.
+                     When None, reads ``application_engine.enabled`` from config.
     """
     load_env()
 
@@ -227,32 +296,49 @@ def get_tier() -> int:
     except FileNotFoundError:
         has_chrome = False
 
-    if has_claude and has_chrome:
+    if form_engine is None:
+        try:
+            form_engine = bool(load_application_engine_config().get("enabled", False))
+        except Exception:
+            form_engine = False
+
+    if has_chrome and (has_claude or form_engine):
         return 3
 
     return 2
 
 
-def check_tier(required: int, feature: str) -> None:
+def check_tier(required: int, feature: str, *, form_engine: bool | None = None) -> None:
     """Raise SystemExit with a clear message if the current tier is too low.
 
     Args:
         required: Minimum tier needed (1, 2, or 3).
         feature: Human-readable description of the feature being gated.
+        form_engine: Forwarded to get_tier(); when True, Claude CLI is optional.
     """
-    current = get_tier()
+    current = get_tier(form_engine=form_engine)
     if current >= required:
         return
 
     from rich.console import Console
     _console = Console(stderr=True)
 
+    use_fe = form_engine
+    if use_fe is None:
+        try:
+            use_fe = bool(load_application_engine_config().get("enabled", False))
+        except Exception:
+            use_fe = False
+
     missing: list[str] = []
     if required >= 2 and not any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL")):
         missing.append("LLM API key — run [bold]applypilot init[/bold] or set GEMINI_API_KEY")
     if required >= 3:
-        if not shutil.which("claude"):
-            missing.append("Claude Code CLI — install from [bold]https://claude.ai/code[/bold]")
+        if not use_fe and not shutil.which("claude"):
+            missing.append(
+                "Claude Code CLI — install from [bold]https://claude.ai/code[/bold] "
+                "(or enable application_engine / pass --form-engine)"
+            )
         try:
             get_chrome_path()
         except FileNotFoundError:
