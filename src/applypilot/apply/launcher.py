@@ -371,8 +371,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
     proc = None
 
     try:
-        proc = subprocess.Popen(
-            cmd,
+        popen_kwargs: dict = dict(
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -382,6 +381,11 @@ def run_job(job: dict, port: int, worker_id: int = 0,
             env=env,
             cwd=str(worker_dir),
         )
+        # Own session so a later killpg() cannot SIGKILL ApplyPilot itself.
+        if platform.system() != "Windows":
+            popen_kwargs["start_new_session"] = True
+
+        proc = subprocess.Popen(cmd, **popen_kwargs)
         with _claude_lock:
             _claude_procs[worker_id] = proc
 
