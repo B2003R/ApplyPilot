@@ -29,12 +29,54 @@ _chrome_lock = threading.Lock()
 # Cross-platform process helpers
 # ---------------------------------------------------------------------------
 
+def _descendant_pids(pid: int) -> list[int]:
+    """Return child PIDs of ``pid`` (direct children only)."""
+    import os
+
+    children: list[int] = []
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return children
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat", encoding="utf-8") as stat_file:
+                stat = stat_file.read()
+        except OSError:
+            continue
+        # comm is wrapped in parentheses and may contain spaces.
+        rparen = stat.rfind(")")
+        if rparen < 0:
+            continue
+        fields = stat[rparen + 2 :].split()
+        if len(fields) > 1 and fields[1] == str(pid):
+            children.append(int(entry))
+    return children
+
+
+def _kill_pid_tree(pid: int) -> None:
+    """SIGKILL ``pid`` and its descendants without signaling a process group."""
+    import os
+    import signal as _signal
+
+    for child in _descendant_pids(pid):
+        _kill_pid_tree(child)
+    try:
+        os.kill(pid, _signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 def _kill_process_tree(pid: int) -> None:
     """Kill a process and all its children.
 
     On Windows, Chrome spawns 10+ child processes (GPU, renderer, etc.),
     so taskkill /T is needed to kill the entire tree. On Unix, os.killpg
-    handles the process group.
+    handles the process group — but only when that group is not our own.
+    Claude is spawned without a new session unless the caller sets one, and
+    killpg() on ApplyPilot's process group SIGKILLs the CLI mid-apply.
     """
     import signal as _signal
 
@@ -47,10 +89,17 @@ def _kill_process_tree(pid: int) -> None:
                 timeout=10,
             )
         else:
-            # Unix: kill entire process group
+            # Unix: kill the target's process group, never our own.
             import os
             try:
-                os.killpg(os.getpgid(pid), _signal.SIGKILL)
+                pgid = os.getpgid(pid)
+            except ProcessLookupError:
+                return
+            if pgid == os.getpgrp():
+                _kill_pid_tree(pid)
+                return
+            try:
+                os.killpg(pgid, _signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 # Process already gone or owned by another user
                 try:
